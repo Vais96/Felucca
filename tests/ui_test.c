@@ -6952,44 +6952,64 @@ static int test_seq_tools(void)
     bad += check("  DRUM RANDOM: kick 3..5 (one on 1), snare on 2 and 4 (+ a ghost), hat 8..12; 60 seeds", ok);
     bad += check("  DRUM COOK x10: each press changes it, the kick on 1 stays", okc);
     ui_power_on();
+    {   /* E4 BOOM BAP: a part by the track's number, its sound with it (track 4: the DRUM KIT at power-on) */
+        const track_t *d = &trk[3];
+        uint8_t hm[4];
+        go_page(GR_ROLL); frame();
+        song.sel = 3; frame();
+        btn_down(B_SEQ); frame();
+        tl_key(6);
+        ok = msg_is("BOOM BAP DRUMS") && drum_track(d) && str_eq(ENG_DRUM.presets[d->preset].name, "BOOM KIT") &&
+             d->p[P_SLEN] == 32 && !d->p[P_SQNT] && d->p[P_SSWING] >= 30 && d->p[P_SSWING] <= 45 &&
+             (tl_lanes_of(d, DV_KICK) & 1u) && ((step_lanes(&d->step[16]) >> DV_KICK) & 1u) &&
+             (tl_lanes_of(d, DV_SNARE) & 0x1010u) == 0x1010u && ((step_accents(&d->step[4]) >> DV_SNARE) & 1u) &&
+             (tl_lanes_of(d, DV_HATC) | tl_lanes_of(d, DV_HATO)) == 0x5555u && step_nudge(&d->step[4]) == 2;
+        bad += check("  E4 BOOM BAP, track 4: BOOM KIT, 2 bars, kick on 1, snare on 2 and 4 accented and late, 8th hats, SWING", ok);
+        song.sel = 1; frame();
+        tl_key(6);
+        ok = msg_is("BOOM BAP CHORDS") && trk[1].eng_req == ENGI_FM6 && str_eq(ENG_FM6.presets[trk[1].preset].name, "DUSTY EP") &&
+             trk[1].p[P_SLEN] == 64 && trk[1].step[0].n == 4u && trk[1].step[0].note[0] < trk[1].step[0].note[3] &&
+             trk[1].p[P_SSWING] == d->p[P_SSWING] && tl_in_key(&trk[1]) && scale_mask(&trk[1]) != 0xFFFu;
+        bad += check("  E4 BOOM BAP, track 2: DUSTY EP, 4 bars of 4-note chords in a new key, the drums' SWING", ok);
+        song.sel = 0; frame();
+        tl_key(6);
+        ok = msg_is("BOOM BAP BASS") && str_eq(ENGINES[trk[0].eng_req]->presets[trk[0].preset].name, "808 BASS") &&
+             trk[0].p[P_SLEN] == 64;
+        for (k = 0; k < 64u; k++) {                     /* a note on each kick, on the chord's root (a slide: below the next) */
+            uint32_t kick = (step_lanes(&d->step[k % 32u]) >> DV_KICK) & 1u;
+            const step_t *s = &trk[0].step[k];
+            ok &= kick == (s->time == ST_NOTE);
+            if (kick && !(s->flags & SF_SLIDE)) {
+                bb_harm(k, hm);
+                ok &= s->note[0] % 12u == hm[0] % 12u && s->note[0] >= 36u && s->note[0] < 60u;
+            }
+        }
+        bad += check("  E4 BOOM BAP, track 1: 808 BASS on the drums' kicks, on the chords' roots, 4 bars", ok);
+        song.sel = 2; frame();
+        tl_key(6);
+        ok = msg_is("BOOM BAP MELODY") && trk[2].p[P_SLEN] == 64 &&
+             (trk[2].eng_req == ENGI_FM6 || trk[2].eng_req == ENGI_SAMPLE) && trk[2].p[P_LEVEL] == (trk[2].eng_req == ENGI_FM6 ? 120 : 106);
+        for (k = 0, i = 0; k < 64u; k++) {              /* every note a tone of the chord under it */
+            const step_t *s = &trk[2].step[k];
+            uint32_t n, j, in = 0;
+            if (s->time != ST_NOTE)
+                continue;
+            n = bb_harm(k, hm);
+            for (j = 0; j < n; j++)
+                in |= s->note[0] % 12u == hm[j] % 12u;
+            ok &= in && s->note[0] >= 60u;
+            i++;
+        }
+        ok &= i >= 6u;
+        undo_swap();                                    /* SAVE held: the press back, its sound too */
+        ok &= trk[2].eng_req == 3u && trk[2].p[P_SLEN] == 16;
+        btn_up(B_SEQ); frame();
+        bad += check("  E4 BOOM BAP, track 3: a melody of chord tones over 4 bars; undo puts back the sound and the steps", ok);
+    }
+    ui_power_on();
     tl_drum();
     go_page(GR_ROLL); frame();
     btn_down(B_SEQ); frame();
-    tl_key(6);                                          /* E4: BOOM BAP */
-    ok = msg_is("BOOM BAP DRUMS") && (tl_lanes_of(TSEL, DV_KICK) & 1u) && (tl_lanes_of(TSEL, DV_SNARE) & 0x1010u) == 0x1010u &&
-         (tl_lanes_of(TSEL, DV_HATC) | tl_lanes_of(TSEL, DV_HATO)) == 0x5555u && ((step_accents(&TSEL->step[4]) >> DV_SNARE) & 1u) &&
-         TSEL->p[P_SSWING] >= 30 && TSEL->p[P_SSWING] <= 45 && TSEL->step[2].vel == 70u;
-    bad += check("  E4 BOOM BAP on DRUM: a kick on 1, the snare on 2 and 4 accented, 8th hats, soft steps, SWING 30..45", ok);
-    {   /* chords on a POLY track, then a bass on a MONO one: on the drum track's kicks, each bar the chord's root */
-        track_t *ch = 0, *bs = 0;
-        const track_t *d;
-        uint32_t kicks = 0;
-        for (k = 0; k < NTRK; k++)
-            if (!drum_track(&trk[k])) {
-                trk[k].p[P_VOICE] = V_MONO;
-                if (!ch) ch = &trk[k]; else if (!bs) bs = &trk[k];
-            }
-        ch->p[P_VOICE] = V_POLY;
-        ch->p[P_SLEN] = bs->p[P_SLEN] = 32;
-        i = song.sel;
-        song.sel = (uint8_t)(ch - trk); frame();
-        tl_key(6);
-        ok = msg_is("BOOM BAP CHORDS") && ch->step[0].n == 4u && ch->step[16].n == 4u && ch->step[0].note[0] < ch->step[0].note[3];
-        song.sel = (uint8_t)(bs - trk); frame();
-        tl_key(6);
-        ok &= msg_is("BOOM BAP BASS");
-        d = bb_other(bs, 1);
-        for (k = 0; k < tl_len(d); k++)
-            kicks |= (step_lanes(&d->step[k]) >> DV_KICK) & 1u;
-        for (k = 0; k < 32u; k++) {
-            uint32_t kick = kicks ? (step_lanes(&d->step[k % tl_len(d)]) >> DV_KICK) & 1u : (BB_KICK[0] >> (k % 16u)) & 1u;
-            ok &= kick == (bs->step[k].time == ST_NOTE);
-            if (kick)
-                ok &= bs->step[k].note[0] % 12u == ch->step[k & ~15u].note[0] % 12u && bs->step[k].note[0] >= 36u;
-        }
-        song.sel = (uint8_t)i; frame();
-        bad += check("  E4 BOOM BAP on melodic tracks: POLY 4-note chords a bar, MONO bass on the kicks on the chords' roots", ok);
-    }
     for (i = 0; i < 16u; i++) {                         /* (the lane tools below start from four on the floor) */
         step_clear(&TSEL->step[i]);
         if (i % 4u == 0u) grid_hit(TSEL, i, DV_KICK, 1);

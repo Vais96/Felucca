@@ -322,6 +322,8 @@ static const preset_t DRUM_PRESETS[] = {
     {"DEEP KIT", {DK_DEEP, 64, 64, 64, 64, 100, 0, 0}, {0, 100, 127, 100}, 0, 0, FX(0, 0, 0, 28), PAT(12)},
     {"TIGHT KIT", {DK_TIGHT, 64, 64, 56, 64, 100, 0, 16}, {0, 100, 127, 100}, 0, 0, FX(0, 0, 0, 8), PAT(12)},
     {"PERC KIT", {DK_PERC, 64, 64, 64, 64, 100, 0, 0}, {0, 100, 127, 100}, 0, 0, FX(0, 0, 0, 24), PAT(12)},
+    /* CRATE (our fork): DEEP tuned down and darker, longer, a harder snare, some drive: a dusty boom-bap kit */
+    {"BOOM KIT", {DK_DEEP, 54, 46, 66, 74, 112, 0, 26}, {0, 100, 127, 100}, 0, 0, FX(0, 0, 0, 14), PAT(12)},
 };
 
 static const engine_t ENG_DRUM = {

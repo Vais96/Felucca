@@ -266,6 +266,8 @@ static const preset_t PHASE_PRESETS[] = {
     {"RESO", {5, 0, 60, 60, 0, 0, 0, 0}, {0, 70, 30, 60}, 0, 0, FX(0, 0, 40, 40), PAT(1)},
     {"BELL", {6, 0, 80, 50, 0, 0, 0, 0}, {0, 95, 0, 90}, 0, 0, FX(0, 0, 30, 70), PAT(7)},
     {"WIRE", {4, 7, 70, 40, 7, 0, 0, 0}, {10, 80, 80, 60}, 0, 0, FX(15, 30, 30, 40), PAT(4)},
+    /* CRATE (our fork): a sine with a short bright knock (DCW 0 + ENV), a touch of SUB, DIST so a small speaker hears it */
+    {"808 BASS", {0, 0, 0, 30, 0, 0, 36, 0}, {0, 112, 96, 56}, 0, 1, FX(14, 0, 0, 4), PAT(8)},
 };
 
 static const engine_t ENG_PHASE = {

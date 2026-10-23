@@ -1468,8 +1468,9 @@ static void midi_pc_load(track_t *t, uint32_t n)
             t->p[P_E0] = (int16_t)k;
         return;
     }
-    if (n >= preset_shown(e)) {
-        int32_t s = (int32_t)(FM6_OWN + 1u + n - preset_shown(e));
+    if (n >= (e == ENGI_FM6 ? FM6_NFACTORY : preset_shown(e))) {   /* (FM6: the bank from 8 on, CRATE's DUSTY EP and
+                                                       * VIBES after F1..F8 by PRESETS only: a number keeps its sound) */
+        int32_t s = (int32_t)(FM6_OWN + 1u + n - (e == ENGI_FM6 ? FM6_NFACTORY : preset_shown(e)));
         if (e == ENGI_FM6 && fm6_bank_slot(s) >= 0 && fm6_slot_ok(s))
             t->p[P_E7] = (int16_t)s;
         return;

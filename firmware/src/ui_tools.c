@@ -546,145 +546,303 @@ static uint32_t tl_half(track_t *t, uint32_t len)
 }
 
 /* ---------------------------------------------------------- BOOM BAP --- */
-/* E4 BOOM BAP (in BEAT's place): a boom-bap pattern on steps 1..LEN of the selected track, another each press.
- *   DRUM: a bar of one of BB_KICK's kicks (from 32 steps on the last bar a variation), the snare on 2 and 4, kick and
- *         snare accented over soft steps (vel 70), a ghost snare or two on the off 16ths at 50 %, 8th closed hats (an
- *         open one on the bar's last 8th now and then); the track's SWING 30..45 (an MPC's 56..59 %).
- *   MONO / LEGATO / UNISON: a bass, octave 2, on the kicks of the first DRUM track (none: BB_KICK[0]'s), a bar each on
- *         the root of the chord a POLY track plays there (none: a progression of BB_PROG).
- *   POLY: seventh chords of the track's scale (CHR: minor), a bar each on a progression of BB_PROG, held or stabbed.
- *   A melodic track swings as the DRUM track. Chords first, then the bass: it follows them */
-static const uint16_t BB_KICK[] = {0x0481, 0x0409, 0x0501, 0x2481, 0x0605};   /* bit i: a kick on step i + 1 */
-static const uint8_t BB_PROG[][4] = {{0, 5, 2, 6}, {0, 3, 0, 4}, {0, 5, 3, 4}, {0, 0, 5, 5}, {1, 4, 0, 0}};  /* degrees */
+/* E4 BOOM BAP (in BEAT's place), CRATE's: a boom-bap part on the selected track with its sound, another each press
+ * (one undo: the steps, the sound and the track's values). The part is the track's number's (a DRUM track: drums):
+ *   1 BASS    808 BASS (PHASE), LEN 64: on the DRUM track's kicks, each note the root of the chord the CHORDS track
+ *             plays there, held to the next one, an octave up now and then, and a slide into a new bar's root from a
+ *             step below.
+ *   2 CHORDS  DUSTY EP (FM6), LEN 64, a new key (ROOT, MIN or now and then DOR): seventh chords on one of BB_PROG, a
+ *             bar each (the last bar's second half now and then a turnaround), each voiced nearest the one before,
+ *             held, stabbed or pushed (a 16th early).
+ *   3 MELODY  VIBES (FM6) or FLUTE (SAMPLE), LEN 64: a one-bar motif of chord tones on one of BB_RHY,
+ *             played on each bar's chord: A A B A (B: its first half and a new answer; now and then bar 2 left empty
+ *             for a voice), the last note the root, held.
+ *   4 DRUMS   BOOM KIT, LEN 32: two bars of BB_KICK's kicks, the snare on 2 and 4 laid back (QUANTIZE OFF, NUDGE +2)
+ *             and accented, 1..2 ghost snares at 50 %, 8th hats of uneven velocity and timing, in bar 2 a hat roll
+ *             (RATCH x3) and now and then an open hat, a clap on 4 or toms at the end; SWING 30..45.
+ * The melodic parts take the CHORDS track's key and the DRUM track's SWING: drums, chords, then bass and melody. Each
+ * part's LEVEL is BB_LEVEL's (the mix measured: the 808 held under the drums, the melody over the chords) */
+enum { BB_BASS, BB_CHORDS, BB_MELODY, BB_DRUMS };
+static const uint16_t BB_KICK[] = {0x0481, 0x0409, 0x0501, 0x2481, 0x0605, 0x0285};   /* bit i: a kick on step i + 1 */
+static const uint16_t BB_RHY[] = {0x1249, 0x0494, 0x4141, 0x0889, 0x0A44};             /* a motif's onsets */
+static const uint8_t BB_PROG[][4] = {{0, 5, 2, 6}, {0, 3, 6, 2}, {0, 0, 5, 4}, {1, 4, 0, 0}, {0, 6, 5, 4}, {5, 4, 0, 0},
+                                     {0, 3, 0, 4}};                                    /* scale degrees, a bar each */
 static uint8_t bb_prog;                                 /* the progression the last chords took (RAM only) */
+static const uint8_t BB_LEVEL[4] = {100, 104, 0, 108};     /* LEVEL by part: -6, -4 dB, (the melody's sound's), -2 dB */
+typedef struct { int32_t root; uint32_t mask; } bb_key_t;
 
-static const track_t *bb_other(const track_t *t, int drum)   /* the first other DRUM (drum) / POLY melodic track */
+static bb_key_t bb_key(void)                            /* the CHORDS track's key (CHR: minor) */
+{
+    bb_key_t k = {trk[BB_CHORDS].p[P_ROOT], scale_mask(&trk[BB_CHORDS])};
+    if (k.mask == 0xFFFu)
+        k.mask = SCALE_MASK[2];
+    return k;
+}
+static int32_t bb_deg(bb_key_t k, int32_t d)            /* scale degree d (0.., any octave) -> semitones above ROOT */
+{
+    uint32_t c[12], n = 0, i;
+    int32_t o;
+    for (i = 0; i < 12u; i++)
+        if ((k.mask >> i) & 1u)
+            c[n++] = i;
+    o = d >= 0 ? d / (int32_t)n : -((-d + (int32_t)n - 1) / (int32_t)n);
+    return (int32_t)c[d - o * (int32_t)n] + 12 * o;
+}
+static const track_t *bb_drum(void)                     /* the first DRUM track, 0 none */
 {
     uint32_t i;
     for (i = 0; i < NTRK; i++)
-        if (&trk[i] != t && drum_track(&trk[i]) == drum && (drum || trk[i].p[P_VOICE] == V_POLY))
+        if (drum_track(&trk[i]))
             return &trk[i];
     return 0;
 }
-/* the pitch class of scale degree d (0..) of t's scale (CHR: minor) and its octave's carry: semitones above ROOT */
-static int32_t bb_degree(const track_t *t, uint32_t d)
+/* t to engine e's preset `name` (inside the action's undo copy: tl_do holds undo_depth) */
+static void bb_sound(track_t *t, const engine_t *e, const char *name)
 {
-    uint32_t mask = scale_mask(t), c[12], n = 0, i;
-    if (mask == 0xFFFu)
-        mask = SCALE_MASK[2];
-    for (i = 0; i < 12u; i++)
-        if ((mask >> i) & 1u)
-            c[n++] = i;
-    return (int32_t)c[d % n] + 12 * (int32_t)(d / n);
+    uint32_t ei, i;
+    for (ei = 0; ei < NENGINES && ENGINES[ei] != e; ei++)
+        ;
+    for (i = 0; ei < NENGINES && i < e->npresets && !str_eq(e->presets[i].name, name); i++)
+        ;
+    if (ei == NENGINES || i == e->npresets)
+        return;
+    if (t->eng_req != ei)
+        set_engine_of(t, ei);
+    apply_preset_to(t, i);
 }
-static void bb_drums(track_t *t, uint32_t len)
+/* the chord on step i: the notes of the CHORDS track sounding there (its NOTE before, LEN wrapping), else the
+ * progression's -> out (low first), their number */
+static uint32_t bb_harm(uint32_t i, uint8_t *out)
 {
-    uint32_t i, b, k = BB_KICK[tl_rnd(sizeof BB_KICK / sizeof BB_KICK[0])], ghost = 0;
-    static const uint8_t GHOST[] = {7, 9, 11, 15};      /* off 16ths without a hat */
-    for (i = 0; i < 2u; i++)
-        ghost |= 1u << GHOST[tl_rnd(sizeof GHOST)];
-    ghost &= ~k;
-    for (i = 0; i < len; i++) {
-        uint32_t kb = k;
-        b = i % 16u;
-        if (len >= 32u && i / 16u == (len - 1u) / 16u)  /* the last bar: a kick more near its end */
-            kb |= tl_rnd(2) ? 0x4000u : 0x8000u;
-        step_clear(&t->step[i]);
-        if ((kb >> b) & 1u)
-            grid_acc(t, i, DV_KICK, 1);
-        if (b == 4u || b == 12u)
-            grid_acc(t, i, DV_SNARE, 1);
-        if (b % 2u == 0u)
-            grid_hit(t, i, b == 14u && !tl_rnd(3) ? DV_HATO : DV_HATC, 1);
-        if ((ghost >> b) & 1u && !((kb >> b) & 1u)) {
-            grid_hit(t, i, DV_SNARE, 1);
-            step_set_chance(&t->step[i], 50);
+    const track_t *c = &trk[BB_CHORDS];
+    uint32_t j, k, n, cl = tl_len(c);
+    bb_key_t key;
+    for (j = 0; !drum_track(c) && j < cl; j++) {
+        const step_t *s = &c->step[(i % cl + cl - j) % cl];
+        if (s->time == ST_NOTE && s->n) {
+            n = s->n < 4u ? s->n : 4u;
+            for (k = 0; k < n; k++) {                   /* (sorted: a hand-made chord may be any order) */
+                uint8_t x = s->note[k];
+                int32_t m = (int32_t)k - 1;
+                for (; m >= 0 && out[m] > x; m--)
+                    out[m + 1] = out[m];
+                out[m + 1] = x;
+            }
+            return n;
         }
-        if (t->step[i].time == ST_NOTE)
-            t->step[i].vel = 70;
     }
-    t->p[P_SSWING] = (int16_t)(30u + tl_rnd(16));
+    key = bb_key();
+    for (n = 0; n < 4u; n++)
+        out[n] = (uint8_t)(48 + key.root + bb_deg(key, BB_PROG[bb_prog][(i / 16u) % 4u] + 2 * (int32_t)n));
+    return 4;
 }
-static void bb_note(step_t *s, uint32_t note, uint32_t vel)   /* a NOTE step of one note */
+/* step i a NOTE of n notes held len steps (TIEs after it, inside 64) */
+static void bb_put(track_t *t, uint32_t i, const int32_t *note, uint32_t n, uint32_t len, uint32_t vel)
 {
+    uint32_t k;
+    step_t *s = &t->step[i % NSTEP];
     step_clear(s);
     s->time = ST_NOTE;
-    s->n = 1;
-    s->note[0] = (uint8_t)note;
+    s->n = (uint8_t)n;
+    for (k = 0; k < n; k++)
+        s->note[k] = (uint8_t)clamp(note[k], 1, 127);
     s->vel = (uint8_t)vel;
+    for (k = 1; k < len && i + k < NSTEP; k++) {
+        step_clear(&t->step[i + k]);
+        t->step[i + k].time = ST_TIE;
+    }
 }
-static void bb_chords(track_t *t, uint32_t len)
+static void bb_clear(track_t *t, uint32_t len)
 {
-    uint32_t i, k, stab = tl_rnd(2), at = 6u + 4u * tl_rnd(2);
-    int32_t base = 48 + t->p[P_ROOT];
-    bb_prog = (uint8_t)tl_rnd(sizeof BB_PROG / sizeof BB_PROG[0]);
-    for (i = 0; i < len; i++) {
-        uint32_t b = i % 16u, d = BB_PROG[bb_prog][(i / 16u) % 4u];
+    uint32_t i;
+    for (i = 0; i < NSTEP; i++)
+        step_clear(&t->step[i]);
+    t->p[P_SLEN] = (int16_t)len;
+}
+
+static void bb_drums(track_t *t)
+{
+    static const uint8_t GHOST[] = {7, 9, 11, 15};      /* off 16ths without a hat */
+    uint32_t nk = NELEM(BB_KICK), k0 = tl_rnd(nk), k1 = (k0 + 1u + tl_rnd(nk - 1u)) % nk, ghost = 0, i;
+    uint32_t clap = !tl_rnd(3), toms = !tl_rnd(3), roll = 0;
+    bb_sound(t, &ENG_DRUM, "BOOM KIT");
+    bb_clear(t, 32);
+    t->p[P_SQNT] = 0;                                   /* QUANTIZE OFF: the NUDGEs play */
+    t->p[P_SSWING] = (int16_t)(30u + tl_rnd(16));
+    for (i = 0; i < 2u; i++)
+        ghost |= 1u << GHOST[tl_rnd(sizeof GHOST)];
+    for (i = 0; i < 32u; i++) {
+        uint32_t b = i % 16u, bar = i / 16u, kb = BB_KICK[bar ? k1 : k0] | 1u, kick = (kb >> b) & 1u;
         step_t *s = &t->step[i];
-        step_clear(s);
-        if (b == 0u || (stab && b == at)) {
-            int32_t r = bb_degree(t, d);
-            s->time = ST_NOTE;
-            s->vel = 90;
-            for (k = 0; k < 4u; k++)                    /* every other scale note: 1 3 5 7 */
-                s->note[k] = (uint8_t)clamp(base + bb_degree(t, d + 2u * k) - (r >= 12 ? 12 : 0), 0, 127);
-            s->n = 4;
-            if (!b)
-                s->flags = SF_ACCENT;
-        } else if (!stab && b < 14u) {
-            s->time = ST_TIE;                           /* held through the bar, its last 8th rests */
+        if (kick)
+            grid_acc(t, i, DV_KICK, 1);
+        if (b == 4u || b == 12u) {
+            grid_acc(t, i, DV_SNARE, 1);
+            if (clap && b == 12u)
+                grid_hit(t, i, DV_CLAP, 1);
+        }
+        if (b % 2u == 0u)
+            grid_hit(t, i, bar && b == 14u && !tl_rnd(2) ? DV_HATO : DV_HATC, 1);
+        if ((ghost >> b) & 1u && !kick) {
+            grid_hit(t, i, DV_SNARE, 1);
+            step_set_chance(s, 50);
+        }
+        if (bar && toms && (b == 13u || b == 15u) && !kick)
+            grid_hit(t, i, DV_TOM, 1);
+        if (bar && !roll && (b == 10u || b == 6u) && !kick) {
+            step_set_ratchet(s, 3);                     /* a hat roll before the turn */
+            roll = 1;
+        }
+        if (s->time == ST_NOTE) {
+            s->vel = (uint8_t)(b % 4u == 0u ? 72u + tl_rnd(14) : 50u + tl_rnd(22));
+            step_set_nudge(s, b == 4u || b == 12u ? 2 : (b & 1u) ? 1 : kick ? 0 : (int32_t)tl_rnd(3) - 1);
         }
     }
 }
-/* the bass's pitch class on step i: the lowest note sounding there on the chords' track c (scanned back to its
- * NOTE), else the progression's degree of that bar */
-static int32_t bb_root(const track_t *t, const track_t *c, uint32_t i)
+
+static void bb_chords(track_t *t)
 {
-    uint32_t j, n, cl = c ? tl_len(c) : 0u, lo = 127;
-    for (j = 0; c && j < cl; j++) {
-        const step_t *s = &c->step[(i + cl - j) % cl];
-        if (s->time == ST_NOTE && s->n) {
-            for (n = 0; n < s->n && n < 4u; n++)
-                lo = s->note[n] < lo ? s->note[n] : lo;
-            return (int32_t)lo % 12;
+    int32_t prev[4] = {0, 0, 0, 0}, tone[4], best[4], c[4], cost, bc, v, o, m, x;
+    uint32_t style = tl_rnd(3), split = !tl_rnd(2), ev, k;
+    bb_key_t key;
+    bb_sound(t, &ENG_FM6, "DUSTY EP");
+    bb_clear(t, 64);
+    t->p[P_ROOT] = (int16_t)tl_rnd(12);
+    t->p[P_SCALE] = (int16_t)(tl_rnd(3) ? 2 : 3);       /* MIN, now and then DOR */
+    bb_prog = (uint8_t)tl_rnd(NELEM(BB_PROG));
+    key = bb_key();
+    for (ev = 0; ev < 5u; ev++) {                       /* a chord a bar, the 5th: bar 4's second half */
+        uint32_t at = 16u * ev, len = 16, deg;
+        if (ev == 4u && !split)
+            break;
+        if (ev == 4u) {
+            at = 56;
+            len = 8;
+            deg = BB_PROG[bb_prog][3] == 4u ? 6u : 4u;  /* the turnaround: v (or VII after a v) */
+        } else {
+            deg = BB_PROG[bb_prog][ev];
+            if (ev == 3u && split)
+                len = 8;
         }
+        for (m = 0; m < 4; m++)
+            tone[m] = 48 + key.root + bb_deg(key, (int32_t)deg + 2 * m);
+        for (bc = 1 << 30, v = 0; v < 4; v++)           /* the inversion and octave nearest the chord before */
+            for (o = -12; o <= 0; o += 12) {
+                for (m = 0; m < 4; m++)
+                    c[m] = tone[m] + o + (m < v ? 12 : 0);
+                for (m = 1; m < 4; m++)                 /* (low first) */
+                    for (x = m; x > 0 && c[x - 1] > c[x]; x--) { int32_t y = c[x]; c[x] = c[x - 1]; c[x - 1] = y; }
+                if (c[0] < 50 || c[3] > 79)
+                    continue;
+                for (cost = 0, m = 0; m < 4; m++)
+                    cost += ev ? (c[m] > prev[m] ? c[m] - prev[m] : prev[m] - c[m]) : (c[0] > 55 ? c[0] - 55 : 55 - c[0]);
+                if (cost < bc) {
+                    bc = cost;
+                    memcpy(best, c, sizeof best);
+                }
+            }
+        memcpy(prev, best, sizeof prev);
+        if (style == 0u) {                              /* held, the last 8th of it resting */
+            bb_put(t, at, best, 4, len - 2u, 92);
+        } else if (style == 1u) {                       /* stabs */
+            static const uint8_t AT[] = {0, 6, 10};
+            for (k = 0; k < 3u && AT[k] < len; k++)
+                bb_put(t, at + AT[k], best, 4, 2, k ? 78u + tl_rnd(12) : 96u);
+        } else {                                        /* pushed: a 16th early (the first on its 1) */
+            bb_put(t, at ? at - 1u : 0u, best, 4, len - 3u, 90);
+        }
+        t->step[at ? (style == 2u ? at - 1u : at) : 0u].flags |= SF_ACCENT;
     }
-    return (t->p[P_ROOT] + bb_degree(t, BB_PROG[bb_prog][(i / 16u) % 4u])) % 12;
 }
-static void bb_bass(track_t *t, uint32_t len)
+
+static void bb_bass(track_t *t)
 {
-    const track_t *d = bb_other(t, 1), *c = bb_other(t, 0);
-    uint32_t i, dl = d ? tl_len(d) : 16u, kicks = 0, tie = 0;
+    const track_t *d = bb_drum();
+    uint32_t dl = d ? tl_len(d) : 16u, kicks = 0, i, j, hit[64];
+    bb_sound(t, &ENG_PHASE, "808 BASS");
+    bb_clear(t, 64);
+    t->p[P_GLIDE] = 22;                                 /* (the slides' glide) */
     for (i = 0; d && i < dl; i++)
         kicks |= (step_lanes(&d->step[i]) >> DV_KICK) & 1u;
-    for (i = 0; i < len; i++) {
-        uint32_t b = i % 16u, hit = kicks ? (step_lanes(&d->step[i % dl]) >> DV_KICK) & 1u : (BB_KICK[0] >> b) & 1u;
-        if (hit) {
-            uint32_t note = 36u + (uint32_t)bb_root(t, c, i) + (b >= 8u && !tl_rnd(4) ? 12u : 0u);   /* an octave up now and then */
-            bb_note(&t->step[i], note, b ? 100u : 120u);
-            tie = 3;
-        } else {
-            step_clear(&t->step[i]);
-            if (tie && --tie)
-                t->step[i].time = ST_TIE;               /* held up to two steps */
+    for (i = 0; i < 64u; i++)
+        hit[i] = kicks ? (step_lanes(&d->step[i % dl]) >> DV_KICK) & 1u : (BB_KICK[0] >> (i % 16u)) & 1u;
+    for (i = 0; i < 64u; i++) {
+        uint8_t ch[4];
+        int32_t note;
+        uint32_t next, vel = i % 16u ? 92u + tl_rnd(14) : 118u;
+        if (!hit[i])
+            continue;
+        for (next = i + 1u; next < 64u && !hit[next]; next++)
+            ;
+        bb_harm(i, ch);
+        note = 36 + ch[0] % 12;
+        if (i % 16u >= 8u && !tl_rnd(4))
+            note += 12;                                 /* an octave up now and then */
+        if (next < 64u && next / 16u != i / 16u && next - i <= 6u && !tl_rnd(2)) {
+            bb_harm(next, ch);                          /* the last before a new bar: a step below its root, sliding up */
+            note = 36 + ch[0] % 12 - (tl_rnd(2) ? 1 : 2);
+            note += note < 36 ? 12 : 0;
+            bb_put(t, i, &note, 1, next - i, vel);
+            t->step[i].flags |= SF_SLIDE;
+            continue;
+        }
+        j = next - i < 8u ? next - i : 8u;              /* held to the next one (an 808) */
+        bb_put(t, i, &note, 1, j, vel);
+    }
+}
+
+static void bb_melody(track_t *t)
+{
+    static const char *const SND[2] = {"VIBES", "FLUTE"};
+    static const engine_t *const ENG[2] = {&ENG_FM6, &ENG_SAMPLE};
+    static const uint8_t LVL[2] = {120, 106};           /* (+4, -3 dB: FLUTE sounds 7 dB over VIBES) */
+    uint32_t rhy = BB_RHY[tl_rnd(NELEM(BB_RHY))], nb = 0, on[16], bar, k, rest2 = !tl_rnd(2), r = tl_rnd(2);
+    int32_t mot[16], ans[16], m = 2 + (int32_t)tl_rnd(3);
+    bb_sound(t, ENG[r], SND[r]);
+    bb_clear(t, 64);
+    t->p[P_LEVEL] = LVL[r];
+    for (k = 0; k < 16u; k++)
+        if ((rhy >> k) & 1u)
+            on[nb++] = k;
+    for (k = 0; k < nb; k++) {                          /* the motif: chord tones (index 0..6: tone k % 4, k / 4 up) */
+        mot[k] = m;
+        ans[k] = clamp(m + (int32_t)tl_rnd(5) - 2, 0, 6);
+        m = clamp(m + (int32_t)tl_rnd(5) - 2, 0, 6);
+    }
+    for (bar = 0; bar < 4u; bar++) {
+        if (bar == 1u && rest2)
+            continue;                                   /* room for a voice */
+        for (k = 0; k < nb; k++) {
+            uint8_t ch[4];
+            uint32_t at = 16u * bar + on[k], end = bar == 3u && k + 1u == nb;
+            uint32_t len = (k + 1u < nb ? on[k + 1] : 16u) - on[k];
+            int32_t idx = end ? 4 : bar == 2u && k >= nb / 2u ? ans[k] : mot[k], note;   /* (the end: the root, up) */
+            bb_harm(at, ch);
+            note = 60 + ch[idx % 4] % 12;
+            note += (note < 65 ? 12 : 0) + 12 * (idx / 4);
+            bb_put(t, at, &note, 1, end || len <= 3u ? len : 3u, 84u + tl_rnd(20));
         }
     }
 }
-static const char *bb_do(track_t *t, uint32_t len)
+
+static const char *bb_do(track_t *t)
 {
-    const track_t *d = bb_other(t, 1);
-    if (drum_track(t)) {
-        bb_drums(t, len);
-        return "BOOM BAP DRUMS";
-    }
-    if (d)
+    const track_t *d = bb_drum();
+    uint32_t role = drum_track(t) ? (uint32_t)BB_DRUMS : trk_index(t) % 4u;
+    static const char *const MSG[4] = {"BOOM BAP BASS", "BOOM BAP CHORDS", "BOOM BAP MELODY", "BOOM BAP DRUMS"};
+    if (role == BB_DRUMS)
+        bb_drums(t);
+    else if (role == BB_CHORDS)
+        bb_chords(t);
+    else if (role == BB_BASS)
+        bb_bass(t);
+    else
+        bb_melody(t);
+    if (role != BB_DRUMS && d)
         t->p[P_SSWING] = d->p[P_SSWING];
-    if (t->p[P_VOICE] == V_POLY) {
-        bb_chords(t, len);
-        return "BOOM BAP CHORDS";
-    }
-    bb_bass(t, len);
-    return "BOOM BAP BASS";
+    if (role != BB_MELODY)
+        t->p[P_LEVEL] = BB_LEVEL[role];
+    return MSG[role];
 }
 
 /* ------------------------------------------------------------ actions --- */
@@ -742,8 +900,11 @@ static const char *tl_do(track_t *t, uint32_t p, uint32_t l)
         fmt_int(b + str_len(b), (int32_t)(p == TL_DOUBLE ? tl_double(t, len) : tl_half(t, len)));
         str_cpy(b + str_len(b), " STEPS", sizeof b - str_len(b));
         return b;                                       /* (nothing emptied inside the new LEN: no unlock) */
-    case TL_BEAT:
-        msg = bb_do(t, len);
+    case TL_BEAT:                                       /* (the sound loads inside this undo copy) */
+        undo.what |= UNDO_SOUND;
+        undo_depth++;
+        msg = bb_do(t);
+        undo_depth--;
         break;
     default:                                            /* the lane's */
         str_cpy(b, drum_lane_name(t, l), sizeof b);

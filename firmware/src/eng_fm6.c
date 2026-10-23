@@ -415,6 +415,9 @@ static const preset_t FM6_PRESETS[] = {
     {"MARIMBA", {0, 0, 0, 0, 0, 0, 0, 5}, {0, 0, 127, 0}, 0, 0, FX(0, 0, 25, 40), PAT(3)},
     {"ORGAN", {0, 0, 0, 0, 0, 0, 0, 6}, {0, 0, 127, 0}, 0, 0, FX(10, 40, 0, 30), PAT(6)},
     {"PLUCK", {0, 0, 0, 0, 0, 0, 0, 7}, {0, 0, 127, 0}, 0, 0, FX(0, 20, 35, 30), PAT(13)},
+    /* CRATE (our fork): TINE EP softened (MLVL, MEG down), detuned, a little dirt, wide chorus; BELL softened to vibes */
+    {"DUSTY EP", {0, 0, -14, 0, -12, 0, 22, 0}, {0, 0, 127, 0}, 0, 0, FX(8, 62, 14, 30), PAT(6)},
+    {"VIBES", {0, 0, -20, 0, -16, 0, 12, 1}, {0, 0, 127, 0}, 0, 0, FX(0, 58, 28, 44), PAT(7)},
 };
 
 static const engine_t ENG_FM6 = {
