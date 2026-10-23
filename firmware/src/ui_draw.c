@@ -336,7 +336,8 @@ static void draw_head(void)
                    (ui.msg_t ? str_hash(7u, ui.msg) : ui.layer * 7919u + (uint32_t)layer_locked() * 3u) + (uint32_t)song.g[G_BPM] * 101u + (ui.bpm_t != 0) * 31u +
                    (uint32_t)seq_counting() * 7u + (ui_prefs & PREF_BPM_LOCK) * 4099u +
                    (uint32_t)batt_shown() * 7777u + (chain.running ? (chain.row + 1u) * 104729u : 0u) +
-                   (slot ? str_hash(11u, sl) : 0u) + (uint32_t)midi_lit(song.sel) * 15485863u;   /* (1.5.5) */
+                   (slot ? str_hash(11u, sl) : 0u) + (uint32_t)midi_lit(song.sel) * 15485863u +   /* (1.5.5) */
+                   (uint32_t)drum_track(TSEL) * 37u;  /* (CRATE: the part's name) */
     int msg = ui.msg_t || ui.layer;
     int centre = !msg || ui.bpm_t || ui.layer == LAYER_GLO;   /* the BPM being changed: it stays, the message right */
     int32_t rx = HEAD_REC_X;
@@ -382,6 +383,16 @@ static void draw_head(void)
         rx += 1;                                       /* (the REC mark's cell after it, its ink 3 px on) */
     }
     draw_rec_mark(rx, T_BG);
+    if (centre) {                                      /* CRATE: the track's part ("BASS"), short where it is tight */
+        int32_t px = rx + (song.rec ? 18 : 4), room;   /* (after the slot letter's cell, kept free: 37 on) */
+        px = px < 37 ? 37 : px;
+        room = g.gx0 - 8 - px;
+        const char *r = trk_role(song.sel, text_w(&AF_S, trk_role(song.sel, 0)) > room);
+        if (text_w(&AF_S, r) <= room) {
+            GFX_HOOK_ALIGN(0, 0, 0, H_HEAD, AL_V, "header text on its middle");
+            cv_text(px, HEAD_SY, &AF_S, r, T_MID);
+        }
+    }
     if (centre) {
         int32_t ib[4], lx = g.bx + g.b[2];             /* lx: the right end of the BPM (and its lock) */
         uint32_t id = song.playing ? (chain.running ? ICON_X_SONG : ICON_X_PLAY) : seq_counting() ? ICON_X_PLAY : ICON_X_STOP;
@@ -815,6 +826,14 @@ static void sound_name(const track_t *t, char *b)
         str_cpy(b, e->presets[t->preset % e->npresets].name, 16);
 }
 
+static int foot_any_step(const track_t *t)          /* a note or a hit in steps 1..LEN */
+{
+    uint32_t i, len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+    for (i = 0; i < len; i++)
+        if (step_on(&seq_steps(t)[i]))
+            return 1;
+    return 0;
+}
 static void draw_foot(void)
 {
     char s[48], pn[16], ti[20], ln[24];
@@ -892,6 +911,8 @@ static void draw_foot(void)
             cv_text_r(232, 2, &AF_S, "ACCENT", T_ACCENT, T_BG);
         else
             cv_key_hint(232 - kh_w(KC_KEYS, "STEPS"), 2, KC_KEYS, "STEPS", 1, T_BG);   /* the keys are the steps */
+    } else if (ui.home && !foot_any_step(t)) {         /* CRATE: an empty track on HOME: how to start one */
+        cv_key_hint(8, 2, KC_SEQ, "+ E4: BOOM BAP", 1, T_BG);
     } else {
         uint32_t i;
         if ((ui.bank + 1u) * 16u <= (uint32_t)t->p[P_SLEN])

@@ -103,6 +103,8 @@ static void felucca_init(void)
 {
     uint32_t i;
     chain_defaults(&chain_config);
+    if (settings_fresh)                       /* CRATE: new settings: HOME shows the four tracks */
+        home_view_default();
     for (i = 0; i < G_COUNT; i++)
         song.g[i] = GP[i].def;
     undo_depth++;                             /* (no undo copy of the power-on loads) */

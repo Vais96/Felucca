@@ -7005,6 +7005,9 @@ static int test_seq_tools(void)
         ok &= trk[2].eng_req == 3u && trk[2].p[P_SLEN] == 16;
         btn_up(B_SEQ); frame();
         bad += check("  E4 BOOM BAP, track 3: a melody of chord tones over 4 bars; undo puts back the sound and the steps", ok);
+        ok = str_eq(trk_role(0, 0), "BASS") && str_eq(trk_role(1, 0), "CHORDS") && str_eq(trk_role(2, 1), "MEL") &&
+             str_eq(trk_role(3, 0), "DRUMS") && !foot_any_step(&trk[2]) == !trk[2].step[0].n;
+        bad += check("  the parts' names (header, HOME > TRACKS): by the track's number, a DRUM track's DRUMS", ok);
     }
     ui_power_on();
     tl_drum();

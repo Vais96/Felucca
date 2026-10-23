@@ -1847,6 +1847,11 @@ static void home_track_row(uint32_t c)
         cv_keycap(xr, TR_NY(large) + (ch - KC_H) / 2, KC_MUTE, sel ? T_INK : T_KEY, sel ? T_THEME : T_INK, bg);
         xr -= 6;
     }
+    if (!mute && !large) {                           /* CRATE: the track's part at the name line's right */
+        const char *r = trk_role(c, 0);
+        cv_text_r(xr, TR_NY(large) - AF_S_CAP_Y, &AF_S, r, sel ? T_INK : T_MID, bg);
+        xr -= text_w(&AF_S, r) + 8;
+    }
     x = 24;
     if (FELUCCA_ICONS && !large) {                   /* the engine's icon on the name's capitals */
         uint32_t ei = engine_icon(ENGINES[t->eng_req % NENGINES]->name);

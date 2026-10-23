@@ -106,6 +106,13 @@ static uint32_t leds_inv(void) { return settings_leds == LEDS_INV && ui_leds_inv
 enum { HV_SCOPE, HV_TRACKS, HV_LEVELS, HV_COUNT };
 static int home_tracks(void) { return ui_home_view == HV_TRACKS || ui_home_view == HV_LEVELS; }
 static int home_levels(void) { return ui_home_view == HV_LEVELS; }
+static void home_view_default(void) { ui_home_view = HV_TRACKS; }   /* CRATE: fresh settings show the four tracks */
+/* CRATE: the part a track plays (BOOM BAP, ui_tools.c): by its number, a DRUM track's drums; sh: the short name */
+static const char *trk_role(uint32_t i, int sh)
+{
+    static const char *const R[2][4] = {{"BASS", "CHORDS", "MELODY", "DRUMS"}, {"BASS", "CHRD", "MEL", "DRUM"}};
+    return R[sh != 0][drum_track(&trk[i % NTRK]) ? 3u : i % 4u];
+}
 enum { RP_CLICK, RP_LEVEL, RP_COUNTIN };
 static uint32_t rp_get(uint32_t f)                     /* a field as the MENU steps it: 0..2 */
 {

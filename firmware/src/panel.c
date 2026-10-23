@@ -114,6 +114,7 @@ static uint32_t leds_step(uint32_t m, int32_t s)
 }
 
 static void palette_apply(void);               /* (ui.c: the palette in use, CUSTOM or a built-in one) */
+static uint8_t settings_fresh;                 /* CRATE: the settings were new at power-on (felucca_init: HOME TRACKS) */
 static void settings_init(void)
 {
     if (settings.magic == SETTINGS_MAGIC_OLD && settings.palette < 20u) {
@@ -123,6 +124,7 @@ static void settings_init(void)
     if (settings.magic != SETTINGS_MAGIC || settings.palette >= NPALETTES) {
         settings.magic = SETTINGS_MAGIC;
         settings.palette = UI_CRATE_INDEX;     /* CRATE (our default; Felucca: GREY) */
+        settings_fresh = 1;                    /* CRATE: HOME will show the four tracks (Felucca: the scope) */
         settings.lowcut = 0;
         settings.zoom = 0;                     /* (retired: the LEDS setting, settings_persist.c) */
     }
