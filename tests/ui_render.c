@@ -1642,33 +1642,28 @@ static void draw(int s)
     }
     if (s == S_SPLASH) {                          /* the power-on splash (main.c, before the UI): its lines, the version
                                                    * shown FELUCCA_VERSION (run_tests.sh: src/felucca.c's) */
-        static const char WANT[] = "Felucca|" FELUCCA_VERSION "|H\xFCgelton Instruments|with community";
+        static const char WANT[] = "CRATE|" FELUCCA_VERSION "|boom bap sampler|on Felucca by H\xFCgelton";
         splash_seen[0] = 0;
         in_splash = 1;
         draw_splash();
         in_splash = 0;
-        {   /* the square whole on the screen (176 x 176 at 32,32, more than the canvas): its edges and square corners
-             * RAISE, BG just outside; its text's ink 16 px in from the left and the top (the bottom: AL_B, the hook) */
-            const int32_t q0 = 32, q1 = 32 + 176 - 1;
-            uint16_t bg = host_screen[0], ra = host_screen[(uint32_t)(q0 + 1) * 240u + (uint32_t)q0 + 1];
-            int32_t i, x, y, ix = 999, iy = 999, bad = ra == bg;
-            for (i = q0 - 1; i <= q1 + 1; i++) {
-                int32_t in = i >= q0 && i <= q1;
-                bad |= host_screen[(uint32_t)(q0 - 1) * 240u + (uint32_t)i] != bg || host_screen[(uint32_t)(q1 + 1) * 240u + (uint32_t)i] != bg
-                    || host_screen[(uint32_t)i * 240u + (uint32_t)(q0 - 1)] != bg || host_screen[(uint32_t)i * 240u + (uint32_t)(q1 + 1)] != bg;
-                if (in)
-                    bad |= host_screen[(uint32_t)q0 * 240u + (uint32_t)i] != ra || host_screen[(uint32_t)q1 * 240u + (uint32_t)i] != ra
-                        || host_screen[(uint32_t)i * 240u + (uint32_t)q0] != ra || host_screen[(uint32_t)i * 240u + (uint32_t)q1] != ra;
-            }
-            for (y = q0; y <= q1; y++)
-                for (x = q0; x <= q1; x++)
-                    if (host_screen[(uint32_t)y * 240u + (uint32_t)x] != ra) {
-                        if (x - q0 < ix) ix = x - q0;
-                        if (y - q0 < iy) iy = y - q0;
+        {   /* CRATE's splash: its ink 16 px in from the left, the right and the top (a round capital's overshoot: 15),
+             * the 16 pads: 5 lit THEME / ACCENT, the rest one unlit colour */
+            uint16_t bg = host_screen[0];
+            int32_t x, y, x0 = 999, x1 = -1, y0 = 999, lit = 0, i;
+            for (y = 0; y < 240; y++)
+                for (x = 0; x < 240; x++)
+                    if (host_screen[(uint32_t)y * 240u + (uint32_t)x] != bg) {
+                        if (x < x0) x0 = x;
+                        if (x > x1) x1 = x;
+                        if (y < y0) y0 = y;
                     }
-            if (bad || ix != 16 || iy != 16) {
-                if (rep) fprintf(rep, "FIND %-26s the splash square not whole (edges %s) or its text not 16 px in (left %d, top %d)\n",
-                                 cur_name, bad ? "off" : "ok", (int)ix, (int)iy);
+            for (i = 0; i < 16; i++)                     /* a pad's middle (from 16,58: 46 x 28, 8 / 6 apart) against */
+                lit += host_screen[(uint32_t)(58 + i / 4 * 34 + 14) * 240u + (uint32_t)(16 + i % 4 * 54 + 23)] !=
+                       host_screen[(uint32_t)(58 + 14) * 240u + (uint32_t)(16 + 54 + 23)];   /* step 2's, unlit */
+            if (x0 != 16 || x1 != 239 - 16 || y0 < 15 || y0 > 16 || lit != 5) {
+                if (rep) fprintf(rep, "FIND %-26s the splash's ink not 16 px in (left %d, right %d, top %d) or %d pads lit, not 5\n",
+                                 cur_name, (int)x0, (int)(239 - x1), (int)y0, (int)lit);
                 nfind++;
             }
         }
@@ -2230,7 +2225,7 @@ int main(int argc, char **argv)
     const char *out = argc > 1 ? argv[1] : "build/ui_new";
     char path[600];
     uint32_t p, s;
-    static const char *const SHOW[] = {"GREY", "MONO", "GREEN", "PAPER", "NIGHT"};   /* (NIGHT: #50, to review) */
+    static const char *const SHOW[] = {"GREY", "MONO", "GREEN", "PAPER", "NIGHT", "CRATE"};   /* (NIGHT: #50, to review; CRATE: ours) */
     snprintf(path, sizeof path, "%s/report.txt", out);
     rep = fopen(path, "w");
     if (!rep) { fprintf(stderr, "cannot write %s\n", path); return 1; }

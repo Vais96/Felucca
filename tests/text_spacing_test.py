@@ -174,7 +174,7 @@ def main():
     a = ap.parse_args()
     RULE[0] = a.rule
     faces = parse(a.header)
-    spec = {n: (font, px) for n, font, px, *_ in gf.preset("inter-tight")}
+    spec = {n: (font, px) for n, font, px, *_ in gf.preset("crate")}   # (tools/build.py: the preset it builds)
     bad = 0
     for name, f in faces.items():
         font, px = spec[name]

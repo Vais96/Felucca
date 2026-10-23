@@ -70,6 +70,7 @@ static void draw_battery(int32_t bx)
 #define ROLL_BPM 4u                                     /* ui.roll[]: the four cards, then the header BPM */
 #define ROLL_Y 18                                       /* a card's value strip: rows 18..34, its figures (21..31) in the middle, */
 #define ROLL_H 17                                       /* the label (MONO's chip: to row 17) above it, the gauge (38) below */
+#define ROLL_VY (ROLL_Y + (ROLL_H - AF_M_CAP_H) / 2 - AF_M_CAP_Y)   /* the M value's line: its figures in the middle (Inter 17) */
 static const uint8_t ROLL_EASE[17] = {0, 45, 84, 118, 147, 172, 193, 210, 223, 234, 242, 247, 251, 253, 254, 255, 255};
 
 static int roll_digit(char c) { return c >= '0' && c <= '9'; }
@@ -753,11 +754,11 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
         else if (vf == &AF_M) {
             if (!ui.roll[c].from[0] && val[0])
                 GFX_HOOK_ALIGN(0, ROLL_Y, COL_W, ROLL_Y + ROLL_H, AL_V, "card value in its roll window");
-            x = roll_text(c, 5, 17, val, vc);
+            x = roll_text(c, 5, ROLL_VY, val, vc);
         } else
             x = cv_text_fit(5, 20, vf, val, vc, T_SURF, room - uw);
         if (unit[0]) {
-            GFX_HOOK_ALIGN(0, 0, 0, vf == &AF_M ? 17 + AF_M.asc : 20 + AF_S.asc, AL_B, "card unit on its value's baseline");
+            GFX_HOOK_ALIGN(0, 0, 0, vf == &AF_M ? ROLL_VY + AF_M.asc : 20 + AF_S.asc, AL_B, "card unit on its value's baseline");
             cv_text_on(x + 3, 20, &AF_S, unit, T_MID, T_SURF);     /* on the value's baseline (S) */
         }
         if (!strip && ratio >= 0) {
@@ -1325,40 +1326,40 @@ static void draw_columns(void)
 }
 
 
-/* The power-on splash (main.c fm1_main, web/emu felucca_web.c; 1.1.5): a RAISE square centred on the screen, square
- * corners (in every style; LINE too: RAISE from the palette's SURF), in it in AF_M, the ink SPL_PAD in from the left:
- * at the top the name and the version, the first line's capitals' top SPL_PAD down; at the bottom the maker and
- * "with community", the last line's capitals' bottom (its baseline) SPL_PAD up from the square's bottom. Both
- * margins are measured to the capitals (the descender of "community" hangs into the bottom one, as off a baseline).
- * The square (176 x 176) is more than the canvas (CV_MAX, 240 x 124): it is filled straight on the screen and its
- * two text bands drawn on it as canvases, the top one from the square's top edge, the bottom one to its bottom edge.
+/* The power-on splash (main.c fm1_main, web/emu felucca_web.c), CRATE's (DESIGN.md): a sampler's boot screen on the
+ * BG, everything SPL_IN in from the left, the top and the bottom. At the top the name in AF_L (its capitals' top
+ * SPL_IN down) and the version in AF_S on its baseline, ending SPL_IN from the right; under them a THEME rule; then
+ * 16 pads, 4 x 4, one bar of BOOM BAP's first beat (ui_tools.c BB_KICK[0]): kicks THEME, snares ACCENT, the rest
+ * RAISE, square corners (hardware), the four of a row across the inset; at the bottom what it is and whose it is built on, the last baseline SPL_IN up.
  * In the saved palette (settings_init before it) */
-#define SPL_SQ 176                                  /* the square (even: centred exactly) */
-#define SPL_X0 ((240u - SPL_SQ) / 2u)               /* its top-left on the screen (x and y) */
-#define SPL_PAD 16                                  /* the text's inset: left (its ink), top and bottom (the capitals) */
-#define SPL_PITCH 20                                /* line to line */
-static const char *const SPLASH_LINES[] = {"Felucca", FELUCCA_VERSION, "H\xFCgelton Instruments", "with community"};
-/* a band of two lines, h tall, at y on the screen: the first line's top at ly; the two lines' capitals declared
- * against al0..al1 (mode: AL_V the band centred there, AL_B the last baseline on al1) */
-static void splash_band(uint32_t y, uint32_t h, int32_t ly, const char *const *l, uint32_t mode, int32_t al0,
-                        int32_t al1, const char *tag)
-{
-    cv_begin(SPL_SQ, h, T_RAISE);
-    GFX_HOOK_ALIGN(0, al0, 0, al1, mode | AL_N(2), tag);
-    cv_text_on(SPL_PAD, ly, &AF_M, l[0], T_TEXT, T_RAISE);
-    cv_text_on(SPL_PAD, ly + SPL_PITCH, &AF_M, l[1], T_TEXT, T_RAISE);
-    cv_blit(SPL_X0, y);
-}
+#define SPL_IN 16                                   /* the inset: left (the ink), top and bottom (the capitals) */
+#define SPL_RULE (SPL_IN + AF_L_CAP_H + 8)          /* the rule's top, 2 px */
+#define SPL_PW 46                                   /* a pad: 46 x 28, 8 apart across (the four fill the inset), */
+#define SPL_PH 28                                   /* 6 down, from SPL_RULE + 14 */
+#define SPL_GX 8
+#define SPL_GY 6
+#define SPL_KICKS 0x0481u                           /* steps 1, 8, 11 (BB_KICK[0]); the snares on 5 and 13 */
+static const char *const SPLASH_LINES[] = {"CRATE", FELUCCA_VERSION, "boom bap sampler", "on Felucca by H\xFCgelton"};
 static void draw_splash(void)
 {
-    int32_t h = SPL_PAD - AF_M_CAP_Y + SPL_PITCH + AF_M.h;     /* a band: its two lines, the descenders in */
-    int32_t lb = h - SPL_PAD - AF_M_CAP_H - AF_M_CAP_Y;         /* the bottom band's last line: its top */
+    int32_t top = SPL_IN - AF_L_CAP_Y, bh = 240 - (SPL_RULE + 14 + 4 * SPL_PH + 3 * SPL_GY);   /* the bottom band */
+    uint32_t i;
     lcd_fill(0, 0, 240, 240, T_BG);
-    lcd_fill(SPL_X0, SPL_X0, SPL_SQ, SPL_SQ, T_RAISE);
-    splash_band(SPL_X0, (uint32_t)h, SPL_PAD - AF_M_CAP_Y, SPLASH_LINES, AL_V, SPL_PAD,
-                SPL_PAD + SPL_PITCH + AF_M_CAP_H, "splash name + version SPL_PAD from the top");
-    splash_band(SPL_X0 + SPL_SQ - (uint32_t)h, (uint32_t)h, lb - SPL_PITCH, SPLASH_LINES + 2, AL_B, 0, h - SPL_PAD,
-                "splash maker's baseline SPL_PAD from the bottom");
+    cv_begin(240, (uint32_t)(top + AF_L.h), T_BG);
+    GFX_HOOK_ALIGN(0, 0, 0, SPL_IN + AF_L_CAP_H - top, AL_B | AL_N(2), "splash name and version on one baseline");
+    cv_text_on(SPL_IN, 0, &AF_L, SPLASH_LINES[0], T_TEXT, T_BG);
+    cv_text_r(240 - SPL_IN, SPL_IN + AF_L_CAP_H - AF_S_CAP_H - AF_S_CAP_Y - top, &AF_S, SPLASH_LINES[1], T_MID, T_BG);
+    cv_blit(0, (uint32_t)top);
+    lcd_fill(SPL_IN, SPL_RULE, 240 - 2 * SPL_IN, 2, T_THEME);
+    for (i = 0; i < 16u; i++) {
+        uint16_t c = (SPL_KICKS >> i) & 1u ? T_THEME : i % 8u == 4u ? T_ACCENT : T_RAISE;
+        lcd_fill(SPL_IN + (i % 4u) * (SPL_PW + SPL_GX), SPL_RULE + 14 + (i / 4u) * (SPL_PH + SPL_GY), SPL_PW, SPL_PH, c);
+    }
+    cv_begin(240, (uint32_t)bh, T_BG);
+    GFX_HOOK_ALIGN(0, 0, 0, bh - SPL_IN, AL_B | AL_N(2), "splash lines' baseline SPL_IN from the bottom");
+    cv_text_on(SPL_IN, bh - SPL_IN - AF_S_CAP_H - AF_S_CAP_Y - 15, &AF_S, SPLASH_LINES[2], T_MID, T_BG);
+    cv_text_on(SPL_IN, bh - SPL_IN - AF_S_CAP_H - AF_S_CAP_Y, &AF_S, SPLASH_LINES[3], T_DIM, T_BG);
+    cv_blit(0, 240u - (uint32_t)bh);
     lcd_sync();
 }
 

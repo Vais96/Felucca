@@ -47,8 +47,9 @@ int main(int argc, char **argv)
     static const uint8_t pd[] = {0x08, 0xf0};
     const aafont_t probe = {1, 1, 'A', 'A', 0, 0, pg, pd, 0, 0, 0};
     double worst = 100;
-    assert(NPALETTES == 10u && !strcmp(UI_PALETTES[0].name, "GREY") && !strcmp(UI_PALETTES[7].name, "HI-CON") &&
-           !strcmp(UI_PALETTES[8].name, "NIGHT") && !strcmp(UI_PALETTES[9].name, "MONO") && UI_BW_INDEX == 9u);
+    assert(NPALETTES == 11u && !strcmp(UI_PALETTES[0].name, "GREY") && !strcmp(UI_PALETTES[7].name, "HI-CON") &&
+           !strcmp(UI_PALETTES[8].name, "NIGHT") && !strcmp(UI_PALETTES[9].name, "MONO") && UI_BW_INDEX == 9u &&
+           !strcmp(UI_PALETTES[10].name, "CRATE") && UI_CRATE_INDEX == 10u);   /* (CRATE: ours, appended) */
     /* (#50, 1.0.2: appended, the ids stay; GREY is the MONO of 1.0.1, id 0) */
     for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {   /* MONO: every token black or white, in FLAT and LINE */
         uint16_t *tok = &ux.bg;
@@ -137,8 +138,9 @@ int main(int argc, char **argv)
     palette_set(6);
     cv_begin(3, 1, T_BG); cv_text(0, 0, &probe, "A", T_THEME);
     assert(swap16(cv_px[1]) != green);
-    /* fonts: Inter Tight S 12 px, M 15 px, L 28 px; tabular digits; the ellipsis; L has capitals only */
-    assert(AF_S.h == 15 && AF_S.asc == 12 && AF_M.h == 19 && AF_M.asc == 15 && AF_L.h == 35 && AF_L.asc == 28);
+    /* fonts (CRATE, tools/gen_aa_font.py --preset crate): Inter Tight S 12 px, IBM Plex Mono M 15 px, L 28 px; tabular
+     * digits; the ellipsis; L has capitals only (Felucca's Inter Tight: M h 19 asc 15, L h 35 asc 28) */
+    assert(AF_S.h == 15 && AF_S.asc == 12 && AF_M.h == 21 && AF_M.asc == 16 && AF_L.h == 37 && AF_L.asc == 29);
     assert(text_w(&AF_M, "0000") == text_w(&AF_M, "1111") && text_w(&AF_S, "1.25") == text_w(&AF_S, "8.75"));
     assert(glyph(&AF_S, (uint8_t)ELLIPSIS) != glyph(&AF_S, '?') && glyph(&AF_M, (uint8_t)ELLIPSIS) != glyph(&AF_M, '?'));
     assert(text_w(&AF_L, "abc") == text_w(&AF_L, "ABC"));
