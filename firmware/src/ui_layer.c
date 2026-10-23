@@ -1074,7 +1074,7 @@ static void layer_edit(void)                            /* the engines from F3, 
  * rows of the sequence's tools only */
 static const uint8_t TL_ICON[TL_N] = {ICON_CLEAR, ICON_X_REVERSE, ICON_X_LEFT, ICON_X_RIGHT, ICON_PROB, ICON_W_SH,
     ICON_DRUM, ICON_PULSE, ICON_CLEAR, ICON_X_REVERSE, ICON_STEPS, ICON_PROB, ICON_LENGTH, ICON_DIVISION};
-static const char *const TL_NAME[TL_N] = {"CLEAR", "REVERSE", "SHIFT", "SHIFT", "RANDOM", "COOK", "BEAT", "EUCLID",
+static const char *const TL_NAME[TL_N] = {"CLEAR", "REVERSE", "SHIFT", "SHIFT", "RANDOM", "COOK", "BOOM", "EUCLID",
     "CLR", "REV", "FILL", "RND", "DOUBLE", "HALF"};
 /* EUCLID open (1.5.5): its cycle as cells, 16 a row (up to 4 rows), the hits filled; past it, inside LEN, the cells
  * of its repeats faint (DRUM: the lanes' row under them as always) */

@@ -3,7 +3,7 @@
 /* Felucca 1.2: the SEQ TOOLS layer's actions (ui_layer.c: SEQ held, on every page). Included by ui_layer.c. The white
  * keys from F3 (TL_*):
  *   F3 CLEAR  G3 REVERSE  A3 SHIFT <  B3 SHIFT >       the whole sequence
- *   C4 RANDOM D4 COOK     E4 BEAT (DRUM)  F4 EUCLID      new / a little changed (EUCLID: 1.5.5, below)
+ *   C4 RANDOM D4 COOK     E4 BOOM BAP     F4 EUCLID      new / a little changed (EUCLID: 1.5.5, BOOM BAP: below)
  *   G4 CLEAR  A4 REVERSE  B4 FILL  C5 RANDOM             the selected lane (DRUM: ui.lane, black keys 1..8 pick it)
  *   D5 DOUBLE E5 HALF                                    LEN x2 / half (1.5.5, below)
  * Each works on the selected track's steps 1..LEN (the steps past LEN stay) and is one undo: SAVE held swaps back
@@ -25,7 +25,7 @@ static uint32_t tl_lane(const step_t *s, uint32_t l) { return (step_lanes(s) >> 
 /* place p's action is there for this track (the lane row and BEAT: DRUM only) */
 static int tl_cell(const track_t *t, uint32_t p)
 {
-    return p < TL_N && (p < TL_BEAT || p == TL_EUCLID || p >= TL_DOUBLE || drum_track(t));
+    return p < TL_N && (p <= TL_EUCLID || p >= TL_DOUBLE || drum_track(t));
 }
 
 /* the undo copy of t as it is now (ui.c load_begin, but the automation is copied and stays): one action */
@@ -545,6 +545,148 @@ static uint32_t tl_half(track_t *t, uint32_t len)
     return h;
 }
 
+/* ---------------------------------------------------------- BOOM BAP --- */
+/* E4 BOOM BAP (in BEAT's place): a boom-bap pattern on steps 1..LEN of the selected track, another each press.
+ *   DRUM: a bar of one of BB_KICK's kicks (from 32 steps on the last bar a variation), the snare on 2 and 4, kick and
+ *         snare accented over soft steps (vel 70), a ghost snare or two on the off 16ths at 50 %, 8th closed hats (an
+ *         open one on the bar's last 8th now and then); the track's SWING 30..45 (an MPC's 56..59 %).
+ *   MONO / LEGATO / UNISON: a bass, octave 2, on the kicks of the first DRUM track (none: BB_KICK[0]'s), a bar each on
+ *         the root of the chord a POLY track plays there (none: a progression of BB_PROG).
+ *   POLY: seventh chords of the track's scale (CHR: minor), a bar each on a progression of BB_PROG, held or stabbed.
+ *   A melodic track swings as the DRUM track. Chords first, then the bass: it follows them */
+static const uint16_t BB_KICK[] = {0x0481, 0x0409, 0x0501, 0x2481, 0x0605};   /* bit i: a kick on step i + 1 */
+static const uint8_t BB_PROG[][4] = {{0, 5, 2, 6}, {0, 3, 0, 4}, {0, 5, 3, 4}, {0, 0, 5, 5}, {1, 4, 0, 0}};  /* degrees */
+static uint8_t bb_prog;                                 /* the progression the last chords took (RAM only) */
+
+static const track_t *bb_other(const track_t *t, int drum)   /* the first other DRUM (drum) / POLY melodic track */
+{
+    uint32_t i;
+    for (i = 0; i < NTRK; i++)
+        if (&trk[i] != t && drum_track(&trk[i]) == drum && (drum || trk[i].p[P_VOICE] == V_POLY))
+            return &trk[i];
+    return 0;
+}
+/* the pitch class of scale degree d (0..) of t's scale (CHR: minor) and its octave's carry: semitones above ROOT */
+static int32_t bb_degree(const track_t *t, uint32_t d)
+{
+    uint32_t mask = scale_mask(t), c[12], n = 0, i;
+    if (mask == 0xFFFu)
+        mask = SCALE_MASK[2];
+    for (i = 0; i < 12u; i++)
+        if ((mask >> i) & 1u)
+            c[n++] = i;
+    return (int32_t)c[d % n] + 12 * (int32_t)(d / n);
+}
+static void bb_drums(track_t *t, uint32_t len)
+{
+    uint32_t i, b, k = BB_KICK[tl_rnd(sizeof BB_KICK / sizeof BB_KICK[0])], ghost = 0;
+    static const uint8_t GHOST[] = {7, 9, 11, 15};      /* off 16ths without a hat */
+    for (i = 0; i < 2u; i++)
+        ghost |= 1u << GHOST[tl_rnd(sizeof GHOST)];
+    ghost &= ~k;
+    for (i = 0; i < len; i++) {
+        uint32_t kb = k;
+        b = i % 16u;
+        if (len >= 32u && i / 16u == (len - 1u) / 16u)  /* the last bar: a kick more near its end */
+            kb |= tl_rnd(2) ? 0x4000u : 0x8000u;
+        step_clear(&t->step[i]);
+        if ((kb >> b) & 1u)
+            grid_acc(t, i, DV_KICK, 1);
+        if (b == 4u || b == 12u)
+            grid_acc(t, i, DV_SNARE, 1);
+        if (b % 2u == 0u)
+            grid_hit(t, i, b == 14u && !tl_rnd(3) ? DV_HATO : DV_HATC, 1);
+        if ((ghost >> b) & 1u && !((kb >> b) & 1u)) {
+            grid_hit(t, i, DV_SNARE, 1);
+            step_set_chance(&t->step[i], 50);
+        }
+        if (t->step[i].time == ST_NOTE)
+            t->step[i].vel = 70;
+    }
+    t->p[P_SSWING] = (int16_t)(30u + tl_rnd(16));
+}
+static void bb_note(step_t *s, uint32_t note, uint32_t vel)   /* a NOTE step of one note */
+{
+    step_clear(s);
+    s->time = ST_NOTE;
+    s->n = 1;
+    s->note[0] = (uint8_t)note;
+    s->vel = (uint8_t)vel;
+}
+static void bb_chords(track_t *t, uint32_t len)
+{
+    uint32_t i, k, stab = tl_rnd(2), at = 6u + 4u * tl_rnd(2);
+    int32_t base = 48 + t->p[P_ROOT];
+    bb_prog = (uint8_t)tl_rnd(sizeof BB_PROG / sizeof BB_PROG[0]);
+    for (i = 0; i < len; i++) {
+        uint32_t b = i % 16u, d = BB_PROG[bb_prog][(i / 16u) % 4u];
+        step_t *s = &t->step[i];
+        step_clear(s);
+        if (b == 0u || (stab && b == at)) {
+            int32_t r = bb_degree(t, d);
+            s->time = ST_NOTE;
+            s->vel = 90;
+            for (k = 0; k < 4u; k++)                    /* every other scale note: 1 3 5 7 */
+                s->note[k] = (uint8_t)clamp(base + bb_degree(t, d + 2u * k) - (r >= 12 ? 12 : 0), 0, 127);
+            s->n = 4;
+            if (!b)
+                s->flags = SF_ACCENT;
+        } else if (!stab && b < 14u) {
+            s->time = ST_TIE;                           /* held through the bar, its last 8th rests */
+        }
+    }
+}
+/* the bass's pitch class on step i: the lowest note sounding there on the chords' track c (scanned back to its
+ * NOTE), else the progression's degree of that bar */
+static int32_t bb_root(const track_t *t, const track_t *c, uint32_t i)
+{
+    uint32_t j, n, cl = c ? tl_len(c) : 0u, lo = 127;
+    for (j = 0; c && j < cl; j++) {
+        const step_t *s = &c->step[(i + cl - j) % cl];
+        if (s->time == ST_NOTE && s->n) {
+            for (n = 0; n < s->n && n < 4u; n++)
+                lo = s->note[n] < lo ? s->note[n] : lo;
+            return (int32_t)lo % 12;
+        }
+    }
+    return (t->p[P_ROOT] + bb_degree(t, BB_PROG[bb_prog][(i / 16u) % 4u])) % 12;
+}
+static void bb_bass(track_t *t, uint32_t len)
+{
+    const track_t *d = bb_other(t, 1), *c = bb_other(t, 0);
+    uint32_t i, dl = d ? tl_len(d) : 16u, kicks = 0, tie = 0;
+    for (i = 0; d && i < dl; i++)
+        kicks |= (step_lanes(&d->step[i]) >> DV_KICK) & 1u;
+    for (i = 0; i < len; i++) {
+        uint32_t b = i % 16u, hit = kicks ? (step_lanes(&d->step[i % dl]) >> DV_KICK) & 1u : (BB_KICK[0] >> b) & 1u;
+        if (hit) {
+            uint32_t note = 36u + (uint32_t)bb_root(t, c, i) + (b >= 8u && !tl_rnd(4) ? 12u : 0u);   /* an octave up now and then */
+            bb_note(&t->step[i], note, b ? 100u : 120u);
+            tie = 3;
+        } else {
+            step_clear(&t->step[i]);
+            if (tie && --tie)
+                t->step[i].time = ST_TIE;               /* held up to two steps */
+        }
+    }
+}
+static const char *bb_do(track_t *t, uint32_t len)
+{
+    const track_t *d = bb_other(t, 1);
+    if (drum_track(t)) {
+        bb_drums(t, len);
+        return "BOOM BAP DRUMS";
+    }
+    if (d)
+        t->p[P_SSWING] = d->p[P_SSWING];
+    if (t->p[P_VOICE] == V_POLY) {
+        bb_chords(t, len);
+        return "BOOM BAP CHORDS";
+    }
+    bb_bass(t, len);
+    return "BOOM BAP BASS";
+}
+
 /* ------------------------------------------------------------ actions --- */
 /* the action of place p on track t (lane l): its message; 0 = nothing done (said why) */
 static const char *tl_do(track_t *t, uint32_t p, uint32_t l)
@@ -600,14 +742,8 @@ static const char *tl_do(track_t *t, uint32_t p, uint32_t l)
         fmt_int(b + str_len(b), (int32_t)(p == TL_DOUBLE ? tl_double(t, len) : tl_half(t, len)));
         str_cpy(b + str_len(b), " STEPS", sizeof b - str_len(b));
         return b;                                       /* (nothing emptied inside the new LEN: no unlock) */
-    case TL_BEAT:                                       /* four on the floor, the backbeat, 8th hats */
-        for (i = 0; i < len; i++) {
-            step_clear(&t->step[i]);
-            if (i % 4u == 0u) grid_hit(t, i, DV_KICK, 1);
-            if (i % 8u == 4u) grid_hit(t, i, DV_SNARE, 1);
-            if (i % 2u == 0u) grid_hit(t, i, DV_HATC, 1);
-        }
-        msg = "BASIC BEAT";
+    case TL_BEAT:
+        msg = bb_do(t, len);
         break;
     default:                                            /* the lane's */
         str_cpy(b, drum_lane_name(t, l), sizeof b);

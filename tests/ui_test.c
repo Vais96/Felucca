@@ -6954,9 +6954,48 @@ static int test_seq_tools(void)
     tl_drum();
     go_page(GR_ROLL); frame();
     btn_down(B_SEQ); frame();
-    tl_key(6);                                          /* E4: BEAT */
-    ok = msg_is("BASIC BEAT") && tl_lanes_of(TSEL, DV_KICK) == 0x1111u && tl_lanes_of(TSEL, DV_SNARE) == 0x1010u &&
-         tl_lanes_of(TSEL, DV_HATC) == 0x5555u;
+    tl_key(6);                                          /* E4: BOOM BAP */
+    ok = msg_is("BOOM BAP DRUMS") && (tl_lanes_of(TSEL, DV_KICK) & 1u) && (tl_lanes_of(TSEL, DV_SNARE) & 0x1010u) == 0x1010u &&
+         (tl_lanes_of(TSEL, DV_HATC) | tl_lanes_of(TSEL, DV_HATO)) == 0x5555u && ((step_accents(&TSEL->step[4]) >> DV_SNARE) & 1u) &&
+         TSEL->p[P_SSWING] >= 30 && TSEL->p[P_SSWING] <= 45 && TSEL->step[2].vel == 70u;
+    bad += check("  E4 BOOM BAP on DRUM: a kick on 1, the snare on 2 and 4 accented, 8th hats, soft steps, SWING 30..45", ok);
+    {   /* chords on a POLY track, then a bass on a MONO one: on the drum track's kicks, each bar the chord's root */
+        track_t *ch = 0, *bs = 0;
+        const track_t *d;
+        uint32_t kicks = 0;
+        for (k = 0; k < NTRK; k++)
+            if (!drum_track(&trk[k])) {
+                trk[k].p[P_VOICE] = V_MONO;
+                if (!ch) ch = &trk[k]; else if (!bs) bs = &trk[k];
+            }
+        ch->p[P_VOICE] = V_POLY;
+        ch->p[P_SLEN] = bs->p[P_SLEN] = 32;
+        i = song.sel;
+        song.sel = (uint8_t)(ch - trk); frame();
+        tl_key(6);
+        ok = msg_is("BOOM BAP CHORDS") && ch->step[0].n == 4u && ch->step[16].n == 4u && ch->step[0].note[0] < ch->step[0].note[3];
+        song.sel = (uint8_t)(bs - trk); frame();
+        tl_key(6);
+        ok &= msg_is("BOOM BAP BASS");
+        d = bb_other(bs, 1);
+        for (k = 0; k < tl_len(d); k++)
+            kicks |= (step_lanes(&d->step[k]) >> DV_KICK) & 1u;
+        for (k = 0; k < 32u; k++) {
+            uint32_t kick = kicks ? (step_lanes(&d->step[k % tl_len(d)]) >> DV_KICK) & 1u : (BB_KICK[0] >> (k % 16u)) & 1u;
+            ok &= kick == (bs->step[k].time == ST_NOTE);
+            if (kick)
+                ok &= bs->step[k].note[0] % 12u == ch->step[k & ~15u].note[0] % 12u && bs->step[k].note[0] >= 36u;
+        }
+        song.sel = (uint8_t)i; frame();
+        bad += check("  E4 BOOM BAP on melodic tracks: POLY 4-note chords a bar, MONO bass on the kicks on the chords' roots", ok);
+    }
+    for (i = 0; i < 16u; i++) {                         /* (the lane tools below start from four on the floor) */
+        step_clear(&TSEL->step[i]);
+        if (i % 4u == 0u) grid_hit(TSEL, i, DV_KICK, 1);
+        if (i % 8u == 4u) grid_hit(TSEL, i, DV_SNARE, 1);
+        if (i % 2u == 0u) grid_hit(TSEL, i, DV_HATC, 1);
+    }
+    ok = 1;
     key_down(black(2)); frame(); key_up(black(2)); frame();   /* black key 3: the CLAP lane */
     ok &= ui.lane == DV_CLAP && !gates();
     tl_key(10);                                         /* B4: FILL, four times round */
@@ -6967,7 +7006,7 @@ static int test_seq_tools(void)
     ok &= tl_lanes_of(TSEL, DV_CLAP) == 0x1111u;
     tl_key(10);
     ok &= !tl_lanes_of(TSEL, DV_CLAP) && msg_is("CLAP CLEARED") && tl_lanes_of(TSEL, DV_KICK) == 0x1111u;
-    bad += check("  E4 BEAT: four on the floor, 2 and 4, 8th hats; black key 3 the lane, B4 FILL 1 / 2 / 4 / none", ok);
+    bad += check("  black key 3 the lane, B4 FILL 1 / 2 / 4 / none", ok);
     ui.lane = DV_SNARE;
     grid_acc(TSEL, 4, DV_SNARE, 1);
     tl_key(9);                                          /* A4: REVERSE the lane */
@@ -6990,13 +7029,13 @@ static int test_seq_tools(void)
     btn_down(B_SEQ); frames(500);                       /* (the map: a peek) */
     memcpy(ref, TSEL->step, sizeof ref);
     a = leds_at(0); b2 = leds_at(250);
-    ok &= ((a ^ b2) >> white(5)) & 1u && !(((a | b2) >> white(6)) & 1u) && !(((a | b2) >> black(0)) & 1u) &&
-          ((a ^ b2) >> white(7)) & 1u;                  /* (1.5.5: F4 EUCLID on every track) */
-    tl_key(6); tl_key(10);
+    ok &= ((a ^ b2) >> white(5)) & 1u && ((a ^ b2) >> white(6)) & 1u && !(((a | b2) >> black(0)) & 1u) &&
+          ((a ^ b2) >> white(7)) & 1u;                  /* (1.5.5: F4 EUCLID, E4 BOOM BAP on every track) */
+    tl_key(10);
     key_down(black(2)); frame(); key_up(black(2)); frame();
     ok &= !memcmp(TSEL->step, ref, sizeof ref) && ui.lane == 0u && !gates();
     btn_up(B_SEQ); frame();
-    bad += check("  LEDs: the tools breathe, the lane lit (DRUM); a melodic track: no BEAT, no lane keys", ok);
+    bad += check("  LEDs: the tools breathe, the lane lit (DRUM); a melodic track: BOOM BAP, no lane keys", ok);
 
     /* the lock (a double tap), a song playing */
     ui_power_on();
